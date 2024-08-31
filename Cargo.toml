@@ -2,6 +2,7 @@
 name = "orderly-allocator"
 version = "0.0.0"
 edition = "2021"
+authors = ["ickk <crates@ickk.io>"]
 license = "MIT OR Apache-2.0"
 description = "orderly-allocator"
 
