@@ -83,7 +83,7 @@ impl OrderlyAllocator {
       available: capacity,
     };
 
-    allocator.insert_free_region(0, capacity);
+    allocator.reset();
 
     allocator
   }
@@ -107,7 +107,7 @@ impl OrderlyAllocator {
   ///
   /// # Panics
   ///
-  /// - panics if `align == 0`.
+  /// - Panics if `align == 0`.
   pub fn alloc_with_align(
     &mut self,
     size: Size,
@@ -151,8 +151,10 @@ impl OrderlyAllocator {
   ///
   /// # Panics
   ///
-  /// - May panics if the allocation's location gets freed twice, without first
-  ///   being re-allocated. Note: This panic will not catch all double frees.
+  /// - May panic if the allocation's location gets freed twice, without first
+  ///   being re-allocated.
+  ///
+  ///   Note: This panic will not catch all double frees.
   pub fn free(&mut self, alloc: Allocation) {
     let mut free_region = FreeRegion {
       location: alloc.offset,
@@ -185,6 +187,14 @@ impl OrderlyAllocator {
     self.available += alloc.size;
   }
 
+  /// Free ***all*** allocations
+  pub fn reset(&mut self) {
+    self.free.clear();
+    self.location_map.clear();
+    self.available = self.capacity;
+    self.insert_free_region(0, self.capacity);
+  }
+
   /// Get the total capacity of the pool
   pub fn capacity(&self) -> Size {
     self.capacity
@@ -192,8 +202,8 @@ impl OrderlyAllocator {
 
   /// Get the total available memory in this pool
   ///
-  /// note: The memory may be fragmented, so it may not be possible to
-  /// allocate an object of this size.
+  /// Note: The memory may be fragmented, so it may not be possible to allocate
+  /// an object of this size.
   pub fn total_available(&self) -> Size {
     self.available
   }
