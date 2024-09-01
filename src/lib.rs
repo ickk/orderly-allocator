@@ -90,8 +90,12 @@ impl OrderlyAllocator {
 
   /// Try to allocate a region with the provided size
   ///
-  /// Uses a *best-fit* strategy, and returns [`Allocation`]s with the minimum
-  /// alignment, `1`.
+  /// Uses a *best-fit* strategy, and returns [`Allocation`]s with arbitrary
+  /// alignment.
+  ///
+  /// # Panics
+  ///
+  /// - Panics if `size == 0`.
   pub fn alloc(&mut self, size: Size) -> Option<Allocation> {
     self.alloc_with_align(size, 1)
   }
@@ -107,6 +111,7 @@ impl OrderlyAllocator {
   ///
   /// # Panics
   ///
+  /// - Panics if `size == 0`.
   /// - Panics if `align == 0`.
   pub fn alloc_with_align(
     &mut self,
@@ -114,8 +119,8 @@ impl OrderlyAllocator {
     align: Size,
   ) -> Option<Allocation> {
     assert!(
-      align >= 1,
-      "`align` must be greater than or equal to 1. align = {align}"
+      size > 0 && align > 0,
+      "`size` & `align` must be greater than zero: size={size}, align={align}"
     );
 
     let FreeRegion {
