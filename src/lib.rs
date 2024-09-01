@@ -47,7 +47,7 @@ pub struct OrderlyAllocator {
 }
 
 // This type has a special implementation of Ord
-#[derive(PartialEq, Eq, Copy, Clone)]
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 struct FreeRegion {
   location: Location,
   size: Size,
@@ -89,31 +89,62 @@ impl OrderlyAllocator {
   }
 
   /// Try to allocate a region with the provided size
+  ///
+  /// Uses a *best-fit* strategy, and returns [`Allocation`]s with the minimum
+  /// alignment, `1`.
   pub fn alloc(&mut self, size: Size) -> Option<Allocation> {
-    let free_region = self
-      .free
-      .range(FreeRegion { size, location: 0 }..)
-      .copied()
-      .next();
+    self.alloc_with_align(size, 1)
+  }
 
-    if let Some(FreeRegion {
-      size: free_region_size,
-      location,
-    }) = free_region
-    {
-      self.remove_free_region(location, free_region_size);
-      if size < free_region_size {
-        self.insert_free_region(location + size, free_region_size - size);
-      }
+  /// Try to allocate a region with the provided size & alignment
+  ///
+  /// Implements the following strategy (not quite *best-fit*):
+  /// - Search for a region with at least `size + align - 1`, and then truncate
+  ///   the start of the region such that alignment is reached.
+  ///
+  /// This is more prone to causing fragmentation compared to an unaligned
+  /// [`alloc`](Self::alloc).
+  ///
+  /// # Panics
+  ///
+  /// - panics if `align == 0`.
+  pub fn alloc_with_align(
+    &mut self,
+    size: Size,
+    align: Size,
+  ) -> Option<Allocation> {
+    assert!(
+      align >= 1,
+      "`align` must be greater than or equal to 1. align = {align}"
+    );
 
-      self.available -= size;
-      return Some(Allocation {
-        size,
-        offset: location,
-      });
+    let FreeRegion {
+      location: mut free_region_location,
+      size: mut free_region_size,
+    } = self.find_region(size + align - 1)?;
+
+    self.remove_free_region(free_region_location, free_region_size);
+
+    let misalignment = free_region_location % align;
+    if misalignment > 0 {
+      self.insert_free_region(free_region_location, misalignment);
+      free_region_location += misalignment;
+      free_region_size -= misalignment;
     }
 
-    None
+    if size < free_region_size {
+      self.insert_free_region(
+        free_region_location + size,
+        free_region_size - size,
+      );
+    }
+
+    self.available -= size;
+
+    Some(Allocation {
+      size,
+      offset: free_region_location,
+    })
   }
 
   /// Free the given allocation
@@ -168,10 +199,24 @@ impl OrderlyAllocator {
     self.free.last().map_or(0, |region| region.size)
   }
 
+  /// Try to find a region with at least `size`
+  fn find_region(&mut self, size: Size) -> Option<FreeRegion> {
+    self
+      .free
+      .range(FreeRegion { size, location: 0 }..)
+      .copied()
+      .next()
+  }
+
   /// remove an entry from the internal free lists
   fn remove_free_region(&mut self, location: Location, size: Size) {
-    self.free.remove(&FreeRegion { location, size });
     self.location_map.remove(&location);
+    let region_existed = self.free.remove(&FreeRegion { location, size });
+    assert!(
+      region_existed,
+      "tried to remove a FreeRegion which did not exist: {:?}",
+      FreeRegion { location, size }
+    );
   }
 
   /// add an entry to the internal free lists
