@@ -121,7 +121,7 @@ impl OrderlyAllocator {
     let FreeRegion {
       location: mut free_region_location,
       size: mut free_region_size,
-    } = self.find_region(size + align - 1)?;
+    } = self.find_free_region(size + align - 1)?;
 
     self.remove_free_region(free_region_location, free_region_size);
 
@@ -148,6 +148,11 @@ impl OrderlyAllocator {
   }
 
   /// Free the given allocation
+  ///
+  /// # Panics
+  ///
+  /// - May panics if the allocation's location gets freed twice, without first
+  ///   being re-allocated. Note: This panic will not catch all double frees.
   pub fn free(&mut self, alloc: Allocation) {
     let mut free_region = FreeRegion {
       location: alloc.offset,
@@ -156,9 +161,8 @@ impl OrderlyAllocator {
 
     // coalesce
     {
-      // previous entry
-      if let Some((&location, &size)) =
-        self.location_map.range(..=alloc.offset).next_back()
+      if let Some(FreeRegion { location, size }) =
+        self.previous_free_region(alloc.offset)
       {
         if location + size == free_region.location {
           self.remove_free_region(location, size);
@@ -166,9 +170,9 @@ impl OrderlyAllocator {
           free_region.size += size;
         }
       };
-      // following entry
-      if let Some((&location, &size)) =
-        self.location_map.range(alloc.offset..).next()
+
+      if let Some(FreeRegion { location, size }) =
+        self.following_free_region(alloc.offset)
       {
         if free_region.location + free_region.size == location {
           self.remove_free_region(location, size);
@@ -200,7 +204,7 @@ impl OrderlyAllocator {
   }
 
   /// Try to find a region with at least `size`
-  fn find_region(&mut self, size: Size) -> Option<FreeRegion> {
+  fn find_free_region(&mut self, size: Size) -> Option<FreeRegion> {
     self
       .free
       .range(FreeRegion { size, location: 0 }..)
@@ -208,10 +212,30 @@ impl OrderlyAllocator {
       .next()
   }
 
-  /// remove an entry from the internal free lists
+  /// Get the first free-region before `location`
+  fn previous_free_region(&self, location: Location) -> Option<FreeRegion> {
+    self
+      .location_map
+      .range(..location)
+      .next_back()
+      .map(|(&location, &size)| FreeRegion { location, size })
+  }
+
+  /// Get the first free-region after `location`
+  fn following_free_region(&self, location: Location) -> Option<FreeRegion> {
+    use ::core::ops::Bound as B;
+    self
+      .location_map
+      .range((B::Excluded(location), B::Unbounded))
+      .next()
+      .map(|(&location, &size)| FreeRegion { location, size })
+  }
+
+  /// remove a region from the internal free lists
   fn remove_free_region(&mut self, location: Location, size: Size) {
     self.location_map.remove(&location);
     let region_existed = self.free.remove(&FreeRegion { location, size });
+
     assert!(
       region_existed,
       "tried to remove a FreeRegion which did not exist: {:?}",
@@ -219,9 +243,19 @@ impl OrderlyAllocator {
     );
   }
 
-  /// add an entry to the internal free lists
+  /// add a region to the internal free lists
   fn insert_free_region(&mut self, location: Location, size: Size) {
     self.free.insert(FreeRegion { location, size });
-    self.location_map.insert(location, size);
+    let existing_size = self.location_map.insert(location, size);
+
+    assert!(
+      existing_size.is_none(),
+      "Double free. Tried to add {new:?}, but {existing:?} was already there",
+      new = FreeRegion { location, size },
+      existing = FreeRegion {
+        location,
+        size: existing_size.unwrap()
+      }
+    )
   }
 }
