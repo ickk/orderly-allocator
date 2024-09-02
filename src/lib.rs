@@ -219,6 +219,11 @@ impl OrderlyAllocator {
     self.free.last().map_or(0, |region| region.size)
   }
 
+  /// Returns true if there are no allocations
+  pub fn is_empty(&self) -> bool {
+    self.capacity == self.available
+  }
+
   /// Try to find a region with at least `size`
   fn find_free_region(&mut self, size: Size) -> Option<FreeRegion> {
     self
