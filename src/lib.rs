@@ -3,7 +3,7 @@
 extern crate alloc;
 use {
   ::alloc::collections::{BTreeMap, BTreeSet},
-  ::core::cmp::Ordering,
+  ::core::{cmp::Ordering, fmt},
 };
 
 type Size = u32;
@@ -34,6 +34,7 @@ pub struct Allocation {
 /// of 11. This means even if the allocator were in a state where it had
 /// ~100,000 separate free-regions, a worst-case lookup will traverse only 5
 /// tree nodes.
+#[derive(Clone)]
 pub struct OrderlyAllocator {
   /// An ordered collection of free-regions, sorted primarily by size, then by
   /// location
@@ -272,5 +273,16 @@ impl OrderlyAllocator {
         size: existing_size.unwrap()
       }
     )
+  }
+}
+
+impl fmt::Debug for OrderlyAllocator {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.write_str("OrderlyAllocator")?;
+    f.debug_map()
+      .entry(&"capacity", &self.capacity)
+      .entry(&"total_available", &self.available)
+      .entry(&"largest_available", &self.largest_available())
+      .finish()
   }
 }
