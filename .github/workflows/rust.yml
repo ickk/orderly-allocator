@@ -1,0 +1,76 @@
+name: rust
+
+on:
+  push:
+    branches: [ "dev" ]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - name: checkout
+      uses: actions/checkout@v4
+
+    - name: rust-toolchain
+      run: rustup show active-toolchain --verbose;
+
+    - name: build-debug
+      run: cargo build --verbose;
+
+  build-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - name: checkout
+      uses: actions/checkout@v4
+
+    - name: rust-toolchain
+      run: rustup show active-toolchain --verbose;
+
+    - name: build-release
+      run: cargo build --release --verbose;
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - name: checkout
+      uses: actions/checkout@v4
+
+    - name: rust-toolchain
+      run: rustup show active-toolchain --verbose;
+
+    - name: test
+      run: cargo test;
+
+  clippy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - name: checkout
+      uses: actions/checkout@v4
+
+    - name: rust-toolchain
+      run: rustup show active-toolchain --verbose;
+
+    - name: clippy
+      run: cargo clippy;
+
+  rustfmt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - name: checkout
+      uses: actions/checkout@v4
+
+    - name: rust-toolchain
+      run: rustup show active-toolchain --verbose;
+
+    - name: rustfmt
+      run: cargo fmt --check;
