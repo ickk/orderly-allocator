@@ -3,7 +3,7 @@
 extern crate alloc;
 use {
   ::alloc::collections::{BTreeMap, BTreeSet},
-  ::core::{cmp::Ordering, fmt},
+  ::core::{cmp::Ordering, fmt, num::NonZero},
 };
 
 type Size = u32;
@@ -15,7 +15,7 @@ pub struct Allocation {
   /// The location of this allocation within the buffer
   pub offset: Location,
   /// The size of this allocation
-  pub size: Size,
+  pub size: NonZero<Size>,
 }
 
 /// A super simple fast soft-realtime allocator for managing an external pool
@@ -40,9 +40,9 @@ pub struct OrderlyAllocator {
   /// location
   free: BTreeSet<FreeRegion>,
   /// An ordered collection of free-regions, sorted by location
-  location_map: BTreeMap<Location, Size>,
+  location_map: BTreeMap<Location, NonZero<Size>>,
   /// The total capacity
-  capacity: Size,
+  capacity: NonZero<Size>,
   /// The amount of free memory
   available: Size,
 }
@@ -51,7 +51,7 @@ pub struct OrderlyAllocator {
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
 struct FreeRegion {
   location: Location,
-  size: Size,
+  size: NonZero<Size>,
 }
 
 impl PartialOrd for FreeRegion {
@@ -76,12 +76,17 @@ impl Ord for FreeRegion {
 
 impl OrderlyAllocator {
   /// Create a new allocator to manage a pool of memory
+  ///
+  /// Panics:
+  /// - Panics if `capacity == 0`
   pub fn new(capacity: Size) -> Self {
+    let capacity = NonZero::new(capacity).expect("`capacity == 0`");
+
     let mut allocator = OrderlyAllocator {
       free: BTreeSet::new(),
       location_map: BTreeMap::new(),
       capacity,
-      available: capacity,
+      available: capacity.get(),
     };
 
     allocator.reset();
@@ -94,9 +99,9 @@ impl OrderlyAllocator {
   /// Uses a *best-fit* strategy, and returns [`Allocation`]s with arbitrary
   /// alignment.
   ///
-  /// # Panics
-  ///
-  /// - Panics if `size == 0`.
+  /// Returns `None` if:
+  /// - `size == 0`, or
+  /// - `size + 1` overflows.
   pub fn alloc(&mut self, size: Size) -> Option<Allocation> {
     self.alloc_with_align(size, 1)
   }
@@ -110,42 +115,40 @@ impl OrderlyAllocator {
   /// This is more prone to causing fragmentation compared to an unaligned
   /// [`alloc`](Self::alloc).
   ///
-  /// # Panics
-  ///
-  /// - Panics if `size == 0`.
-  /// - Panics if `align == 0`.
+  /// Returns `None` if:
+  /// - there are no free-regions with `size + align - 1` available space, or
+  /// - `size == 0`, or
+  /// - `align == 0`, or
+  /// - `size + align` overflows.
   pub fn alloc_with_align(
     &mut self,
     size: Size,
     align: Size,
   ) -> Option<Allocation> {
-    assert!(
-      size > 0 && align > 0,
-      "`size` & `align` must be greater than zero: size={size}, align={align}"
-    );
+    let size = NonZero::new(size)?;
+    let align = NonZero::new(align)?;
 
     let FreeRegion {
       location: mut free_region_location,
-      size: mut free_region_size,
-    } = self.find_free_region(size + align - 1)?;
+      size: free_region_size,
+    } = self.find_free_region(size.checked_add(align.get() - 1)?)?;
 
     self.remove_free_region(free_region_location, free_region_size);
 
-    let misalignment = free_region_location % align;
-    if misalignment > 0 {
+    let mut free_region_size: u32 = free_region_size.get();
+
+    if let Some(misalignment) = NonZero::new(free_region_location % align) {
       self.insert_free_region(free_region_location, misalignment);
-      free_region_location += misalignment;
-      free_region_size -= misalignment;
+      free_region_location += misalignment.get();
+      free_region_size -= misalignment.get();
     }
 
-    if size < free_region_size {
-      self.insert_free_region(
-        free_region_location + size,
-        free_region_size - size,
-      );
+    if let Some(size_leftover) = NonZero::new(free_region_size - size.get()) {
+      self
+        .insert_free_region(free_region_location + size.get(), size_leftover);
     }
 
-    self.available -= size;
+    self.available -= size.get();
 
     Some(Allocation {
       size,
@@ -172,38 +175,44 @@ impl OrderlyAllocator {
       if let Some(FreeRegion { location, size }) =
         self.previous_free_region(alloc.offset)
       {
-        if location + size == free_region.location {
+        if location + size.get() == free_region.location {
           self.remove_free_region(location, size);
           free_region.location = location;
-          free_region.size += size;
+          // note: this unwrap is ok because the sum of all free-regions cannot
+          // be larger than the total size of the allocator; which we know is
+          // some `Size`.
+          free_region.size = free_region.size.checked_add(size.get()).unwrap();
         }
       };
 
       if let Some(FreeRegion { location, size }) =
         self.following_free_region(alloc.offset)
       {
-        if free_region.location + free_region.size == location {
+        if free_region.location + free_region.size.get() == location {
           self.remove_free_region(location, size);
-          free_region.size += size;
+          // note: this unwrap is ok because the sum of all free-regions cannot
+          // be larger than the total size of the allocator; which we know is
+          // some `Size`.
+          free_region.size = free_region.size.checked_add(size.get()).unwrap();
         }
       }
     }
 
     self.insert_free_region(free_region.location, free_region.size);
-    self.available += alloc.size;
+    self.available += alloc.size.get();
   }
 
   /// Free ***all*** allocations
   pub fn reset(&mut self) {
     self.free.clear();
     self.location_map.clear();
-    self.available = self.capacity;
+    self.available = self.capacity.get();
     self.insert_free_region(0, self.capacity);
   }
 
   /// Get the total capacity of the pool
   pub fn capacity(&self) -> Size {
-    self.capacity
+    self.capacity.get()
   }
 
   /// Get the total available memory in this pool
@@ -216,16 +225,16 @@ impl OrderlyAllocator {
 
   /// Get the size of the largest available memory region in this pool
   pub fn largest_available(&self) -> Size {
-    self.free.last().map_or(0, |region| region.size)
+    self.free.last().map_or(0, |region| region.size.get())
   }
 
   /// Returns true if there are no allocations
   pub fn is_empty(&self) -> bool {
-    self.capacity == self.available
+    self.capacity.get() == self.available
   }
 
   /// Try to find a region with at least `size`
-  fn find_free_region(&mut self, size: Size) -> Option<FreeRegion> {
+  fn find_free_region(&mut self, size: NonZero<Size>) -> Option<FreeRegion> {
     self
       .free
       .range(FreeRegion { size, location: 0 }..)
@@ -253,7 +262,7 @@ impl OrderlyAllocator {
   }
 
   /// remove a region from the internal free lists
-  fn remove_free_region(&mut self, location: Location, size: Size) {
+  fn remove_free_region(&mut self, location: Location, size: NonZero<Size>) {
     self.location_map.remove(&location);
     let region_existed = self.free.remove(&FreeRegion { location, size });
 
@@ -265,7 +274,7 @@ impl OrderlyAllocator {
   }
 
   /// add a region to the internal free lists
-  fn insert_free_region(&mut self, location: Location, size: Size) {
+  fn insert_free_region(&mut self, location: Location, size: NonZero<Size>) {
     self.free.insert(FreeRegion { location, size });
     let existing_size = self.location_map.insert(location, size);
 
@@ -275,7 +284,7 @@ impl OrderlyAllocator {
       new = FreeRegion { location, size },
       existing = FreeRegion {
         location,
-        size: existing_size.unwrap()
+        size: existing_size.unwrap_or_else(|| unreachable!())
       }
     )
   }
