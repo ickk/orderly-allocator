@@ -292,11 +292,10 @@ impl OrderlyAllocator {
 
 impl fmt::Debug for OrderlyAllocator {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    f.write_str("OrderlyAllocator")?;
-    f.debug_map()
-      .entry(&"capacity", &self.capacity)
-      .entry(&"total_available", &self.available)
-      .entry(&"largest_available", &self.largest_available())
+    f.debug_struct("OrderlyAllocator")
+      .field(&"capacity", &self.capacity)
+      .field(&"total_available", &self.available)
+      .field(&"largest_available", &self.largest_available())
       .finish()
   }
 }
