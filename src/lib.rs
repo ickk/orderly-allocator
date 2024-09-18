@@ -18,7 +18,7 @@ pub struct Allocation {
   pub size: NonZero<Size>,
 }
 
-/// A super simple fast soft-realtime allocator for managing an external pool
+/// A super-simple fast soft-realtime allocator for managing an external pool
 /// of memory
 ///
 /// Since the pool of memory it manages is external, it could be useful as a
@@ -35,7 +35,7 @@ pub struct Allocation {
 /// ~100,000 separate free-regions, a worst-case lookup will traverse only 5
 /// tree nodes.
 #[derive(Clone)]
-pub struct OrderlyAllocator {
+pub struct Allocator {
   /// An ordered collection of free-regions, sorted primarily by size, then by
   /// location
   free: BTreeSet<FreeRegion>,
@@ -74,7 +74,7 @@ impl Ord for FreeRegion {
   }
 }
 
-impl OrderlyAllocator {
+impl Allocator {
   /// Create a new allocator to manage a pool of memory
   ///
   /// Panics:
@@ -82,7 +82,7 @@ impl OrderlyAllocator {
   pub fn new(capacity: Size) -> Self {
     let capacity = NonZero::new(capacity).expect("`capacity == 0`");
 
-    let mut allocator = OrderlyAllocator {
+    let mut allocator = Allocator {
       free: BTreeSet::new(),
       location_map: BTreeMap::new(),
       capacity,
@@ -290,9 +290,9 @@ impl OrderlyAllocator {
   }
 }
 
-impl fmt::Debug for OrderlyAllocator {
+impl fmt::Debug for Allocator {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    f.debug_struct("OrderlyAllocator")
+    f.debug_struct("Allocator")
       .field(&"capacity", &self.capacity)
       .field(&"total_available", &self.available)
       .field(&"largest_available", &self.largest_available())

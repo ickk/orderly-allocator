@@ -1,13 +1,13 @@
 `orderly-allocator`
 ===================
 
-A super simple fast soft-realtime allocator for managing an external pool of
-memory
+A super-simple fast soft-realtime allocator for managing an external pool of
+memory.
 
 Since the pool of memory it manages is external, it could be useful as a
 suballocator for e.g. a GPU buffer.
 
-Has worst-case *O(log(n))* performance for `alloc` & `free`, but provides a
+Has worst-case *O(log(n))*\* performance for `alloc` & `free`, but provides a
 *best-fit* search strategy & immediately coalesces on `free` resulting in low
 fragmentation.
 
@@ -26,11 +26,11 @@ implementation.
 
 ### Future Work
 
-Currently, the BTree implementation at the heart of `orderly-allocator` asks
+*Currently, the BTree implementation at the heart of `orderly-allocator` asks
 the global-allocator for memory for newly-created nodes every now and then. It
 would be possible to turn this into a firm- or hard-realtime allocator by using
-a different BTree implementation which pulled new nodes from a preallocated
-set.
+a different BTree implementation which preallocated as set of nodes ahead of
+time.
 
 
 ### Other Libraries
@@ -53,6 +53,7 @@ This crate is licensed under any of the [Apache license 2.0], or the
 [Apache license 2.0]: ./LICENSE-APACHE
 [MIT license]: ./LICENSE-MIT
 [Zlib license]: ./LICENSE-ZLIB
+
 
 ### Contribution
 
