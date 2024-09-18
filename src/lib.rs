@@ -10,7 +10,7 @@ type Size = u32;
 type Location = Size;
 
 /// Metadata containing information about an allocation
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct Allocation {
   /// The location of this allocation within the buffer
   pub offset: Location,
