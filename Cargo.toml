@@ -3,11 +3,14 @@ name = "orderly-allocator"
 version = "0.1.0"
 edition = "2021"
 authors = ["ickk <crates@ickk.io>"]
-description = "A super simple fast soft-realtime allocator for managing an external pool of memory"
+description = "A super-simple fast soft-realtime allocator for managing an external pool of memory"
 license = "MIT OR Apache-2.0 OR Zlib"
 readme = "./README.md"
 include = ["src/", "LICENSE-APACHE", "LICENSE-MIT", "LICENSE-ZLIB"]
 repository = "https://github.com/ickk/orderly-allocator/"
+documentation = "https://docs.rs/orderly-allocator"
+categories = ["memory-management", "no-std"]
+keywords = ["allocator"]
 
 [dependencies]
 

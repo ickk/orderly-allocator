@@ -29,7 +29,7 @@ implementation.
 *Currently, the BTree implementation at the heart of `orderly-allocator` asks
 the global-allocator for memory for newly-created nodes every now and then. It
 would be possible to turn this into a firm- or hard-realtime allocator by using
-a different BTree implementation which preallocated as set of nodes ahead of
+a different BTree implementation which preallocated a set of nodes ahead of
 time.
 
 
