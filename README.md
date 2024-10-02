@@ -43,21 +43,21 @@ assert_eq!(allocator.total_available(), POOL_SIZE);
 // allocate some memory
 let allocation = allocator.alloc_with_align(
   size_of::<Object>() as u32,
-  align_of::<Object>() as u32
+  align_of::<Object>() as u32,
 );
 
 // fill the corresponding memory region with some data
 if let Some(allocation) = allocation {
   let object = Object([
-    0x68, 0x65, 0x6C, 0x6C, 0x6F, 0x2C, 0x20, 0x6F, 0x72, 0x64, 0x65, 0x72,
-    0x6C, 0x79, 0x21, 0x0,
+    0x68, 0x65, 0x6C, 0x6C, 0x6F, 0x2C, 0x20, 0x6F,
+    0x72, 0x64, 0x65, 0x72, 0x6C, 0x79, 0x21, 0x0,
   ]);
   &memory[allocation.range()].copy_from_slice(&object.0[..]);
 }
 
 assert_eq!(
   allocator.total_available(),
-  POOL_SIZE - size_of::<Object>() as u32
+  POOL_SIZE - size_of::<Object>() as u32,
 );
 
 // free the memory region when it is no longer needed
