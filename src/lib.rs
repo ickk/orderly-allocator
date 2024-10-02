@@ -3,13 +3,21 @@
 extern crate alloc;
 use {
   ::alloc::collections::{BTreeMap, BTreeSet},
-  ::core::{cmp::Ordering, fmt, num::NonZero},
+  ::core::{cmp::Ordering, fmt, num::NonZero, ops::Range},
 };
 
 type Size = u32;
 type Location = Size;
 
 /// Metadata containing information about an allocation
+///
+/// This is a small freely copiable type. It also provides a niche, so that
+/// `Option<Allocation>` has the same size as `Allocation`.
+/// ```
+/// # use {::core::mem::size_of, ::orderly_allocator::Allocation};
+/// assert_eq!(size_of::<Allocation>(), size_of::<u64>());
+/// assert_eq!(size_of::<Option<Allocation>>(), size_of::<Allocation>());
+/// ```
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct Allocation {
   /// The location of this allocation within the buffer
@@ -18,22 +26,31 @@ pub struct Allocation {
   pub size: NonZero<Size>,
 }
 
-/// A super-simple fast soft-realtime allocator for managing an external pool
-/// of memory
-///
-/// Since the pool of memory it manages is external, it could be useful as a
-/// suballocator for e.g. a GPU buffer.
-///
-/// Has worst-case *O(log(n))* performance for `alloc` & `free`, but provides a
-/// *best-fit* search strategy & immediately coalesces on `free` resulting in
-/// low fragmentation.
-///
-/// The *O(log(n))* performance characteristics are due to using BTrees
-/// internally. So, despite the *temporal-complexity*, expect excellent
-/// real-world performance; Rust's BTree implementation uses a branching factor
-/// of 11. This means even if the allocator were in a state where it had
-/// ~100,000 separate free-regions, a worst-case lookup will traverse only 5
-/// tree nodes.
+impl Allocation {
+  /// Get a [`Range<usize>`] from `offset` to `offset + size`
+  ///
+  /// This can be used to directly index a buffer.
+  ///
+  /// For example:
+  /// ```
+  /// # use {::core::num::NonZero, ::orderly_allocator::Allocation};
+  /// let buffer: Vec<usize> = (0..100).collect();
+  /// let allocation = Allocation {
+  ///   offset: 25,
+  ///   size: NonZero::new(4).unwrap()
+  /// };
+  ///
+  /// let region = &buffer[allocation.range()];
+  ///
+  /// assert_eq!(region, &[25, 26, 27, 28]);
+  /// ```
+  pub fn range(&self) -> Range<usize> {
+    (self.offset as usize)..((self.offset + self.size.get()) as usize)
+  }
+}
+
+/// A super-simple soft-realtime allocator for managing an external pool of
+/// memory
 #[derive(Clone)]
 pub struct Allocator {
   /// An ordered collection of free-regions, sorted primarily by size, then by
@@ -293,9 +310,9 @@ impl Allocator {
 impl fmt::Debug for Allocator {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     f.debug_struct("Allocator")
-      .field(&"capacity", &self.capacity)
-      .field(&"total_available", &self.available)
-      .field(&"largest_available", &self.largest_available())
+      .field("capacity", &self.capacity)
+      .field("total_available", &self.available)
+      .field("largest_available", &self.largest_available())
       .finish()
   }
 }
