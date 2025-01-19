@@ -372,6 +372,22 @@ impl Allocator {
     self.capacity.get() == self.available
   }
 
+  /// Returns an iterator over the unallocated regions
+  ///
+  /// This should be used **only** for gathering metadata about the internal
+  /// state of the allocator for debugging purposes.
+  ///
+  /// You must not use this instead of allocating; subsequent calls to `alloc`
+  /// will freely allocate from the reported regions.
+  pub fn report_free_regions(
+    &self,
+  ) -> impl Iterator<Item = Allocation> + use<'_> {
+    self.free.iter().map(|free_region| Allocation {
+      offset: free_region.location,
+      size: free_region.size,
+    })
+  }
+
   /// Try to find a region with at least `size`
   fn find_free_region(&mut self, size: NonZero<Size>) -> Option<FreeRegion> {
     self
