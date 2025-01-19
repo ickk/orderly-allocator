@@ -194,7 +194,7 @@ fn try_reallocate() {
   const CAPACITY: u32 = 10_000_000;
   const ALLOC_SIZE: u32 = 50_000;
   let mut allocator = Allocator::new(CAPACITY);
-  let a = &allocator.alloc(ALLOC_SIZE).unwrap();
+  let a = allocator.alloc(ALLOC_SIZE).unwrap();
   let _b = allocator.alloc(3_000).unwrap();
   let _c = allocator.alloc(50_000).unwrap();
   allocator.free(_b);
@@ -203,7 +203,7 @@ fn try_reallocate() {
 
   // try to grow alloc too much (error)
   {
-    let err = allocator.try_reallocate(*a, a.size() + 10_000);
+    let err = allocator.try_reallocate(a, a.size() + 10_000);
     assert!(matches!(
       err,
       Err(ReallocateError::InsufficientSpace { .. })
@@ -217,7 +217,7 @@ fn try_reallocate() {
 
   // try to shrink alloc too much (error)
   {
-    let err = allocator.try_reallocate(*a, 0);
+    let err = allocator.try_reallocate(a, 0);
     assert!(matches!(err, Err(ReallocateError::Invalid)));
     assert_eq!(
       allocator.total_available(),
@@ -227,28 +227,46 @@ fn try_reallocate() {
   }
 
   // try to grow alloc (success)
-  let new_size = ALLOC_SIZE + 1_000;
-  let grown_a = allocator.try_reallocate(*a, new_size).unwrap();
-  assert_eq!(grown_a.offset(), a.offset());
-  assert_eq!(grown_a.size(), new_size);
-  assert_eq!(
-    allocator.total_available(),
-    initial_available - 1_000,
-    "Allocates additional space when reallocating"
-  );
-  #[allow(unused)]
-  let a = (); // shadow a so we don't use the wrong thing below
+  let a = {
+    let new_size = ALLOC_SIZE + 1_000;
+    let new_a = allocator.try_reallocate(a, new_size).unwrap();
+    assert_eq!(new_a.offset(), a.offset());
+    assert_eq!(new_a.size(), new_size);
+    assert_eq!(
+      allocator.total_available(),
+      initial_available - 1_000,
+      "Allocates additional space when reallocating"
+    );
+
+    new_a // shadow `a` so we don't use the wrong thing below
+  };
+
+  // try to grow alloc just enough (success)
+  let a = {
+    let new_size = ALLOC_SIZE + 3_000;
+    let new_a = allocator.try_reallocate(a, new_size).unwrap();
+    assert_eq!(new_a.offset(), a.offset());
+    assert_eq!(new_a.size(), new_size);
+    assert_eq!(
+      allocator.total_available(),
+      initial_available - 3_000,
+      "Allocates additional space when reallocating"
+    );
+    new_a
+  };
 
   // try to shrink alloc
-  let new_size = ALLOC_SIZE - 333;
-  let shrunk_a = allocator.try_reallocate(grown_a, new_size).unwrap();
-  assert_eq!(shrunk_a.offset(), grown_a.offset());
-  assert_eq!(shrunk_a.size(), new_size);
-  assert_eq!(
-    allocator.total_available(),
-    initial_available + 333,
-    "Frees additional space when reallocating"
-  );
   #[allow(unused)]
-  let grown_a = ();
+  let a = {
+    let new_size = ALLOC_SIZE - 333;
+    let new_a = allocator.try_reallocate(a, new_size).unwrap();
+    assert_eq!(new_a.offset(), a.offset());
+    assert_eq!(new_a.size(), new_size);
+    assert_eq!(
+      allocator.total_available(),
+      initial_available + 333,
+      "Frees additional space when reallocating"
+    );
+    new_a
+  };
 }
