@@ -27,12 +27,26 @@ pub struct Allocation {
 }
 
 impl Allocation {
+  /// Get the offset of the allocation
+  ///
+  /// This is just a wrapper for `allocation.offset` for symmetry with `size`.
+  pub fn offset(&self) -> Location {
+    self.offset
+  }
+
+  /// Get the size of the allocation
+  ///
+  /// This is just sugar for `allocation.size.get()`.
+  pub fn size(&self) -> Size {
+    self.size.get()
+  }
+
   /// Get a [`Range<usize>`] from `offset` to `offset + size`
   ///
   /// This can be used to directly index a buffer.
   ///
   /// For example:
-  /// ```
+  /// ```ignore
   /// # use {::core::num::NonZero, ::orderly_allocator::Allocation};
   /// let buffer: Vec<usize> = (0..100).collect();
   /// let allocation = Allocation {
@@ -255,6 +269,84 @@ impl Allocator {
     Ok(())
   }
 
+  /// Try to re-size an existing allocation in-place
+  ///
+  /// Will not change the offset of the allocation and tries to expand the
+  /// allocation to the right if there is sufficient free space.
+  ///
+  /// Returns:
+  /// - `Ok(Allocation)` on success.
+  /// - `Err(InsufficientSpace)` if there is not enough available space
+  /// to expand the allocation to `new_size`. In this case, the existing
+  /// allocation is left untouched.
+  pub fn try_reallocate(
+    &mut self,
+    alloc: Allocation,
+    new_size: Size,
+  ) -> Result<Allocation, ReallocateError> {
+    let Some(new_size) = NonZero::new(new_size) else {
+      return Err(ReallocateError::Invalid);
+    };
+
+    match new_size.cmp(&alloc.size) {
+      Ordering::Greater => {
+        let required_additional = NonZero::new(new_size.get() - alloc.size())
+          .unwrap_or_else(|| unreachable!());
+        // find the next free-region;
+        let Some(next_free) = self.following_free_region(alloc.offset) else {
+          return Err(ReallocateError::InsufficientSpace {
+            required_additional,
+            available: 0,
+          });
+        };
+        // Check that the free-region we found is actually contiguous with our
+        // allocation, and that it has enough space
+        if next_free.location != alloc.offset + alloc.size() {
+          return Err(ReallocateError::InsufficientSpace {
+            required_additional,
+            available: 0,
+          });
+        }
+        if next_free.size < required_additional {
+          return Err(ReallocateError::InsufficientSpace {
+            required_additional,
+            available: next_free.size.get(),
+          });
+        }
+        // all good, take what we need and return the rest
+        let new_alloc = Allocation {
+          offset: alloc.offset,
+          size: new_size,
+        };
+        self.remove_free_region(next_free.location, next_free.size);
+        self.insert_free_region(
+          new_alloc.offset + new_alloc.size(),
+          NonZero::new(next_free.size.get() - required_additional.get())
+            .unwrap_or_else(|| unreachable!()),
+        );
+        self.available -= required_additional.get();
+        Ok(new_alloc)
+      },
+      Ordering::Less => {
+        // free the additional space
+        let additional = NonZero::new(alloc.size() - new_size.get())
+          .unwrap_or_else(|| unreachable!());
+        self.free(Allocation {
+          offset: alloc.offset + alloc.size() - additional.get(),
+          size: additional,
+        });
+        Ok(Allocation {
+          offset: alloc.offset,
+          size: new_size,
+        })
+      },
+      Ordering::Equal => {
+        // do nothing
+        return Ok(alloc);
+      },
+    }
+  }
+
   /// Get the total capacity of the pool
   pub fn capacity(&self) -> Size {
     self.capacity.get()
@@ -357,5 +449,32 @@ impl fmt::Display for Overflow {
       "Overflow Error: Allocator with capacity {} could not grow by additional {}.",
       self.current_capacity, self.additional
     ))
+  }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum ReallocateError {
+  InsufficientSpace {
+    required_additional: NonZero<Size>,
+    available: Size,
+  },
+  Invalid,
+}
+
+impl Error for ReallocateError {}
+impl fmt::Display for ReallocateError {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match self {
+      ReallocateError::InsufficientSpace {
+        required_additional,
+        available,
+      } => f.write_fmt(format_args!(
+        "InsufficientSpace Error: Unable to expand allocation: \
+          required_additional:{required_additional}, available:{available}."
+      )),
+      ReallocateError::Invalid => {
+        f.write_str("Invalid allocation or `new_size` was 0")
+      },
+    }
   }
 }
