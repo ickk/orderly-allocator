@@ -319,11 +319,14 @@ impl Allocator {
           size: new_size,
         };
         self.remove_free_region(next_free.location, next_free.size);
-        self.insert_free_region(
-          new_alloc.offset + new_alloc.size(),
+        if let Some(new_free_region_size) =
           NonZero::new(next_free.size.get() - required_additional.get())
-            .unwrap_or_else(|| unreachable!()),
-        );
+        {
+          self.insert_free_region(
+            new_alloc.offset + new_alloc.size(),
+            new_free_region_size,
+          );
+        }
         self.available -= required_additional.get();
 
         Ok(new_alloc)
