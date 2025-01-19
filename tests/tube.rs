@@ -1,5 +1,4 @@
-use ::orderly_allocator::{Allocation, Allocator};
-use orderly_allocator::ReallocateError;
+use ::orderly_allocator::{Allocation, Allocator, ReallocateError};
 
 #[test]
 fn allocaton_type_size() {
