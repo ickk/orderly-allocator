@@ -3,7 +3,7 @@
 extern crate alloc;
 use {
   ::alloc::collections::{BTreeMap, BTreeSet},
-  ::core::{cmp::Ordering, fmt, num::NonZero, ops::Range},
+  ::core::{cmp::Ordering, error::Error, fmt, num::NonZero, ops::Range},
 };
 
 type Size = u32;
@@ -227,6 +227,31 @@ impl Allocator {
     self.insert_free_region(0, self.capacity);
   }
 
+  /// Add new free space at the end of the allocator
+  ///
+  /// Returns `Err(Overflow)` if `self.capacity + additional` would overflow.
+  pub fn grow_capacity(&mut self, additional: Size) -> Result<(), Overflow> {
+    let Some(additional) = NonZero::new(additional) else {
+      return Ok(()); // `additional` is zero, so do nothing
+    };
+
+    let current_capacity = self.capacity;
+    let Some(new_capacity) = current_capacity.checked_add(additional.get())
+    else {
+      return Err(Overflow {
+        current_capacity,
+        additional,
+      });
+    };
+
+    self.capacity = new_capacity;
+    self.free(Allocation {
+      offset: current_capacity.get(),
+      size: additional,
+    });
+    Ok(())
+  }
+
   /// Get the total capacity of the pool
   pub fn capacity(&self) -> Size {
     self.capacity.get()
@@ -314,5 +339,20 @@ impl fmt::Debug for Allocator {
       .field("total_available", &self.available)
       .field("largest_available", &self.largest_available())
       .finish()
+  }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct Overflow {
+  pub current_capacity: NonZero<Size>,
+  pub additional: NonZero<Size>,
+}
+impl Error for Overflow {}
+impl fmt::Display for Overflow {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.write_fmt(format_args!(
+      "Overflow Error: Allocator with capacity {} could not grow by additional {}.",
+      self.current_capacity, self.additional
+    ))
   }
 }
