@@ -152,9 +152,11 @@ impl Allocator {
 
     self.remove_free_region(free_region_location, free_region_size);
 
-    let mut free_region_size: u32 = free_region_size.get();
+    let mut free_region_size = free_region_size.get();
 
-    if let Some(misalignment) = NonZero::new(free_region_location % align) {
+    if let Some(misalignment) =
+      NonZero::new((align.get() - (free_region_location % align)) % align)
+    {
       self.insert_free_region(free_region_location, misalignment);
       free_region_location += misalignment.get();
       free_region_size -= misalignment.get();
