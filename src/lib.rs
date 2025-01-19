@@ -277,8 +277,8 @@ impl Allocator {
   /// Returns:
   /// - `Ok(Allocation)` on success.
   /// - `Err(InsufficientSpace)` if there is not enough available space
-  /// to expand the allocation to `new_size`. In this case, the existing
-  /// allocation is left untouched.
+  ///   to expand the allocation to `new_size`. In this case, the existing
+  ///   allocation is left untouched.
   pub fn try_reallocate(
     &mut self,
     alloc: Allocation,
@@ -325,6 +325,7 @@ impl Allocator {
             .unwrap_or_else(|| unreachable!()),
         );
         self.available -= required_additional.get();
+
         Ok(new_alloc)
       },
       Ordering::Less => {
@@ -335,6 +336,7 @@ impl Allocator {
           offset: alloc.offset + alloc.size() - additional.get(),
           size: additional,
         });
+
         Ok(Allocation {
           offset: alloc.offset,
           size: new_size,
@@ -342,7 +344,7 @@ impl Allocator {
       },
       Ordering::Equal => {
         // do nothing
-        return Ok(alloc);
+        Ok(alloc)
       },
     }
   }
