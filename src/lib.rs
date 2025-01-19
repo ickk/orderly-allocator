@@ -11,7 +11,7 @@ type Location = Size;
 
 /// Metadata containing information about an allocation
 ///
-/// This is a small freely copiable type. It also provides a niche, so that
+/// This is a small `Copy` type. It also provides a niche, so that
 /// `Option<Allocation>` has the same size as `Allocation`.
 /// ```
 /// # use {::core::mem::size_of, ::orderly_allocator::Allocation};
@@ -64,7 +64,8 @@ pub struct Allocator {
   available: Size,
 }
 
-// This type has a special implementation of Ord
+// This type has an explicit implementation of Ord, since we rely on properties
+// of its behaviour to find and select free regions.
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
 struct FreeRegion {
   location: Location,
