@@ -15,3 +15,12 @@ keywords = ["allocator"]
 [dependencies]
 
 [lints]
+
+[dev-dependencies]
+offset-allocator = "0.2.0"
+rand = { version = "0.8.5", features = ["small_rng"] }
+range-alloc = "0.1.4"
+
+[[bench]]
+name = "noxim"
+harness = false
