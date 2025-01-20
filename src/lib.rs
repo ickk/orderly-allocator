@@ -2,7 +2,7 @@
 #![no_std]
 extern crate alloc;
 use {
-  ::alloc::collections::{BTreeMap, BTreeSet},
+  ::btree_slab::{BTreeMap, BTreeSet},
   ::core::{cmp::Ordering, error::Error, fmt, num::NonZero, ops::Range},
 };
 

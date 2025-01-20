@@ -13,5 +13,9 @@ categories = ["memory-management", "no-std"]
 keywords = ["allocator"]
 
 [dependencies]
+btree-slab = "0.6.1"
 
 [lints]
+
+[patch.crates-io]
+btree-slab = { git = "https://github.com/ickk/btree-slab2", rev = "8c707ad" }
