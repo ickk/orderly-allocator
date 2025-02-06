@@ -60,7 +60,7 @@ jobs:
       run: rustup show active-toolchain --verbose;
 
     - name: clippy
-      run: cargo clippy;
+      run: cargo clippy --all-targets -- -Dwarnings;
 
   rustfmt:
     runs-on: ubuntu-latest
