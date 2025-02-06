@@ -6,23 +6,34 @@
 
 A super-simple soft-realtime allocator for managing an external pool of memory.
 
-Since the allocator stores its metadata separately from the memory pool it
-manages, it could be useful as a suballocator for e.g. a GPU buffer.
+This allocator stores its metadata separately from the memory it manages, so it
+can be useful as a suballocator for a GPU buffer.
 
-Has worst-case *O*(*log*(*n*)) performance\* for `alloc` & `free`. Provides
-a best-fit search strategy and coalesces immediately on `free`, resulting in
-low fragmentation.
+A pair of BTrees is used to manage state internally, giving `orderly-allocator`
+worst-case O(log(n)) performance for `alloc` & `free`\*. Uses a "best-fit"
+search strategy and coalesces immediately on `free`, resulting in low
+fragmentation.
 
-`orderly-allocator` uses BTrees internally, so while it has *O*(*log*(*n*))
-complexity expect excellent real-world performance; Rust's BTree implementation
-uses a branching factor of 11. This means even if the allocator were in a state
-where it had ~100,000 separate free-regions, a worst-case lookup will traverse
-only 5 tree nodes.
+Provided functionality:
+- `alloc(size)`
+- `alloc_with_align(size, align)`
+- `free(allocation)`
+- `try_reallocate(allocation, new_size)` - grow/shrink an allocation in-place
+- `grow_capacity(additional)` - expand the allocator itself
+- `reset()` - free all allocations
+
+Metadata facilities:
+- `capacity()`
+- `is_empty()`
+- `largest_available()` - size of the biggest free region
+- `total_available()` - size of the sum of all free regions
+- `report_free_regions()` - iterator of free regions
+
 
 ### Usage
 
-This crate provides two types [`Allocator`] and [`Allocation`] which can be
-used to manage any kind of buffer as demonstrated.
+This crate provides [`Allocator`] and [`Allocation`] which can be used to
+manage any kind of buffer.
 
 ```rust
 use {
@@ -30,68 +41,61 @@ use {
   ::orderly_allocator::{Allocation, Allocator},
 };
 
-#[repr(transparent)]
-struct Object([u8; 16]);
+// Create memory and allocator
+const CAPACITY: u32 = 65_536;
+let mut memory: Vec<u8> = vec![0; CAPACITY as usize];
+let mut allocator = Allocator::new(CAPACITY);
 
-// get a pool of memory and create an allocator to manage it
-const POOL_SIZE: u32 = 2u32.pow(16);
-let mut memory: Vec<u8> = vec![0; POOL_SIZE as usize];
-let mut allocator = Allocator::new(POOL_SIZE);
+// An object to store
+type Object = [u8; 16];
+let object: Object = [
+  0x68, 0x65, 0x6C, 0x6C, 0x6F, 0x2C, 0x20, 0x6F,
+  0x72, 0x64, 0x65, 0x72, 0x6C, 0x79, 0x21, 0x0,
+];
 
-assert_eq!(allocator.total_available(), POOL_SIZE);
-
-// allocate some memory
+// Allocate some memory
 let allocation = allocator.alloc_with_align(
   size_of::<Object>() as u32,
   align_of::<Object>() as u32,
-);
+).unwrap();
 
-// fill the corresponding memory region with some data
-if let Some(allocation) = allocation {
-  let object = Object([
-    0x68, 0x65, 0x6C, 0x6C, 0x6F, 0x2C, 0x20, 0x6F,
-    0x72, 0x64, 0x65, 0x72, 0x6C, 0x79, 0x21, 0x0,
-  ]);
-  &memory[allocation.range()].copy_from_slice(&object.0[..]);
-}
+// Fill the allocation
+memory[allocation.range()].copy_from_slice(&object[..]);
 
-assert_eq!(
-  allocator.total_available(),
-  POOL_SIZE - size_of::<Object>() as u32,
-);
-
-// free the memory region when it is no longer needed
-allocator.free(allocation.unwrap());
-
-assert_eq!(allocator.total_available(), POOL_SIZE);
+// Later, free the memory region
+allocator.free(allocation);
 ```
 
 
 ### `#![no_std]`
 
-This crate works in a `no_std` context, however it currently requires the
-`alloc` crate for the BTree implementation.
+This crate works in a `no_std` context, however it requires the `alloc` crate
+for the BTree implementation.
 
 
 ### Future Work
 
-*Currently the BTree implementation at the heart of `orderly-allocator` will
-ask the global-allocator for memory, for newly-created nodes, every now and
-then.
+*The BTree implementation at the heart of `orderly-allocator` is simply the
+standard library's `BTreeMap`/`BTreeSet`. This means the global-allocator is
+used to create new tree-nodes every now and then. For real-time graphics this
+is fine as the cost is amortised, and more importantly the I/O to actually
+*fill* the allocated memory is likely to be the far greater cost.
 
-It would be possible to turn this into a firm- or hard-realtime allocator by
-using a different BTree implementation, one which preallocated memory for its
+It would be possible to improve performance and turn this into a firm- or
+hard-realtime allocator by using a BTree implementation that pre-allocated
 nodes ahead of time.
 
 
-### Other Libraries
+### Alternatives
 
-Other libraries in the ecosystem that might serve a similar purpose:
+Other libraries in the ecosystem that serve a similar purpose:
 
-- [offset-allocator], A Rust port of Sebastian Aaltonen's
+- [range-alloc] Generic range allocator, from the gfx-rs/wgpu project.
+- [offset-allocator] A Rust port of Sebastian Aaltonen's
   [C++ package][sebbbi/OffsetAllocator] of the same name.
 
-[offset-allocator]: https://github.com/pcwalton/offset-allocator
+[range-alloc]: https://crates.io/crates/range-alloc
+[offset-allocator]: https://crates.io/crates/offset-allocator
 [sebbbi/OffsetAllocator]: https://github.com/sebbbi/OffsetAllocator
 
 
@@ -108,6 +112,6 @@ This crate is licensed under any of the [Apache license 2.0], or the
 
 ### Contribution
 
-Unless explicitly stated otherwise, any contributions you intentionally submit
-for inclusion in this work shall be licensed as above, without any additional
-terms or conditions.
+Unless you explicitly state otherwise, any contributions you intentionally
+submit for inclusion in this work shall be licensed as above, without any
+additional terms or conditions.
