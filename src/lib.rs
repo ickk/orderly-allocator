@@ -3,11 +3,13 @@
 extern crate alloc;
 use {
   ::alloc::collections::{BTreeMap, BTreeSet},
-  ::core::{cmp::Ordering, error::Error, fmt, num::NonZero, ops::Range},
+  ::core::{cmp::Ordering, error::Error, fmt, ops::Range},
 };
 
-type Size = u32;
-type Location = Size;
+use private::{NonZeroSize, Size};
+
+/// The non-zero counterpart of `S`, e.g. `core::num::NonZero<u32>` for `u32`
+type NonZero<S> = <S as Size>::NonZero;
 
 /// Metadata containing information about an allocation
 ///
@@ -19,25 +21,25 @@ type Location = Size;
 /// assert_eq!(size_of::<Option<Allocation>>(), size_of::<Allocation>());
 /// ```
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
-pub struct Allocation {
+pub struct Allocation<S: Size = u32> {
   /// The location of this allocation within the buffer
-  pub offset: Location,
+  pub offset: S,
   /// The size of this allocation
-  pub size: NonZero<Size>,
+  pub size: NonZero<S>,
 }
 
-impl Allocation {
+impl<S: Size> Allocation<S> {
   /// Get the offset of the allocation
   ///
   /// This is just a wrapper for `allocation.offset` for symmetry with `size`.
-  pub fn offset(&self) -> Location {
+  pub fn offset(&self) -> S {
     self.offset
   }
 
   /// Get the size of the allocation
   ///
   /// This is just sugar for `allocation.size.get()`.
-  pub fn size(&self) -> Size {
+  pub fn size(&self) -> S {
     self.size.get()
   }
 
@@ -51,7 +53,7 @@ impl Allocation {
   /// let buffer: Vec<usize> = (0..100).collect();
   /// let allocation = Allocation {
   ///   offset: 25,
-  ///   size: NonZero::new(4).unwrap()
+  ///   size: NonZero::<S>::new(4).unwrap()
   /// };
   ///
   /// let region = &buffer[allocation.range()];
@@ -59,40 +61,43 @@ impl Allocation {
   /// assert_eq!(region, &[25, 26, 27, 28]);
   /// ```
   pub fn range(&self) -> Range<usize> {
-    (self.offset as usize)..((self.offset + self.size.get()) as usize)
+    self.offset.as_usize()..(self.offset + self.size.get()).as_usize()
   }
 }
 
 /// A super-simple soft-realtime allocator for managing an external pool of
 /// memory
+///
+/// The type used to measure offsets and sizes defaults to `u32`, but any
+/// unsigned integer type can be used.
 #[derive(Clone)]
-pub struct Allocator {
+pub struct Allocator<S: Size = u32> {
   /// An ordered collection of free-regions, sorted primarily by size, then by
   /// location
-  free: BTreeSet<FreeRegion>,
+  free: BTreeSet<FreeRegion<S>>,
   /// An ordered collection of free-regions, sorted by location
-  location_map: BTreeMap<Location, NonZero<Size>>,
+  location_map: BTreeMap<S, NonZero<S>>,
   /// The total capacity
-  capacity: NonZero<Size>,
+  capacity: NonZero<S>,
   /// The amount of free memory
-  available: Size,
+  available: S,
 }
 
 // This type has an explicit implementation of Ord, since we rely on properties
 // of its behaviour to find and select free regions.
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
-struct FreeRegion {
-  location: Location,
-  size: NonZero<Size>,
+struct FreeRegion<S: Size> {
+  location: S,
+  size: NonZero<S>,
 }
 
-impl PartialOrd for FreeRegion {
+impl<S: Size> PartialOrd for FreeRegion<S> {
   fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
     Some(self.cmp(other))
   }
 }
 
-impl Ord for FreeRegion {
+impl<S: Size> Ord for FreeRegion<S> {
   fn cmp(&self, other: &Self) -> Ordering {
     use Ordering as O;
     match (
@@ -106,13 +111,13 @@ impl Ord for FreeRegion {
   }
 }
 
-impl Allocator {
+impl<S: Size> Allocator<S> {
   /// Create a new allocator to manage a pool of memory
   ///
   /// Panics:
   /// - Panics if `capacity == 0`
-  pub fn new(capacity: Size) -> Self {
-    let capacity = NonZero::new(capacity).expect("`capacity == 0`");
+  pub fn new(capacity: S) -> Self {
+    let capacity = NonZero::<S>::new(capacity).expect("`capacity == 0`");
 
     let mut allocator = Allocator {
       free: BTreeSet::new(),
@@ -134,8 +139,8 @@ impl Allocator {
   /// Returns `None` if:
   /// - `size == 0`, or
   /// - `size + 1` overflows.
-  pub fn alloc(&mut self, size: Size) -> Option<Allocation> {
-    self.alloc_with_align(size, 1)
+  pub fn alloc(&mut self, size: S) -> Option<Allocation<S>> {
+    self.alloc_with_align(size, S::ONE)
   }
 
   /// Try to allocate a region with the provided size & alignment
@@ -154,30 +159,32 @@ impl Allocator {
   /// - `size + align` overflows.
   pub fn alloc_with_align(
     &mut self,
-    size: Size,
-    align: Size,
-  ) -> Option<Allocation> {
-    let size = NonZero::new(size)?;
-    let align = NonZero::new(align)?;
+    size: S,
+    align: S,
+  ) -> Option<Allocation<S>> {
+    let size = NonZero::<S>::new(size)?;
+    let align = NonZero::<S>::new(align)?;
 
     let FreeRegion {
       location: mut free_region_location,
       size: free_region_size,
-    } = self.find_free_region(size.checked_add(align.get() - 1)?)?;
+    } = self.find_free_region(size.checked_add(align.get() - S::ONE)?)?;
 
     self.remove_free_region(free_region_location, free_region_size);
 
     let mut free_region_size = free_region_size.get();
 
-    if let Some(misalignment) =
-      NonZero::new((align.get() - (free_region_location % align)) % align)
-    {
+    if let Some(misalignment) = NonZero::<S>::new(
+      (align.get() - (free_region_location % align.get())) % align.get(),
+    ) {
       self.insert_free_region(free_region_location, misalignment);
       free_region_location += misalignment.get();
       free_region_size -= misalignment.get();
     }
 
-    if let Some(size_leftover) = NonZero::new(free_region_size - size.get()) {
+    if let Some(size_leftover) =
+      NonZero::<S>::new(free_region_size - size.get())
+    {
       self
         .insert_free_region(free_region_location + size.get(), size_leftover);
     }
@@ -198,7 +205,7 @@ impl Allocator {
   ///   being re-allocated.
   ///
   ///   Note: This panic will not catch all double frees.
-  pub fn free(&mut self, alloc: Allocation) {
+  pub fn free(&mut self, alloc: Allocation<S>) {
     let mut free_region = FreeRegion {
       location: alloc.offset,
       size: alloc.size,
@@ -241,14 +248,14 @@ impl Allocator {
     self.free.clear();
     self.location_map.clear();
     self.available = self.capacity.get();
-    self.insert_free_region(0, self.capacity);
+    self.insert_free_region(S::ZERO, self.capacity);
   }
 
   /// Add new free space at the end of the allocator
   ///
   /// Returns `Err(Overflow)` if `self.capacity + additional` would overflow.
-  pub fn grow_capacity(&mut self, additional: Size) -> Result<(), Overflow> {
-    let Some(additional) = NonZero::new(additional) else {
+  pub fn grow_capacity(&mut self, additional: S) -> Result<(), Overflow<S>> {
+    let Some(additional) = NonZero::<S>::new(additional) else {
       return Ok(()); // `additional` is zero, so do nothing
     };
 
@@ -281,22 +288,23 @@ impl Allocator {
   ///   allocation is left untouched.
   pub fn try_reallocate(
     &mut self,
-    alloc: Allocation,
-    new_size: Size,
-  ) -> Result<Allocation, ReallocateError> {
-    let Some(new_size) = NonZero::new(new_size) else {
+    alloc: Allocation<S>,
+    new_size: S,
+  ) -> Result<Allocation<S>, ReallocateError<S>> {
+    let Some(new_size) = NonZero::<S>::new(new_size) else {
       return Err(ReallocateError::Invalid);
     };
 
     match new_size.cmp(&alloc.size) {
       Ordering::Greater => {
-        let required_additional = NonZero::new(new_size.get() - alloc.size())
-          .unwrap_or_else(|| unreachable!());
+        let required_additional =
+          NonZero::<S>::new(new_size.get() - alloc.size())
+            .unwrap_or_else(|| unreachable!());
         // find the next free-region;
         let Some(next_free) = self.following_free_region(alloc.offset) else {
           return Err(ReallocateError::InsufficientSpace {
             required_additional,
-            available: 0,
+            available: S::ZERO,
           });
         };
         // Check that the free-region we found is actually contiguous with our
@@ -304,7 +312,7 @@ impl Allocator {
         if next_free.location != alloc.offset + alloc.size() {
           return Err(ReallocateError::InsufficientSpace {
             required_additional,
-            available: 0,
+            available: S::ZERO,
           });
         }
         if next_free.size < required_additional {
@@ -320,7 +328,7 @@ impl Allocator {
         };
         self.remove_free_region(next_free.location, next_free.size);
         if let Some(size_leftover) =
-          NonZero::new(next_free.size.get() - required_additional.get())
+          NonZero::<S>::new(next_free.size.get() - required_additional.get())
         {
           self.insert_free_region(
             new_alloc.offset + new_alloc.size(),
@@ -333,7 +341,7 @@ impl Allocator {
       },
       Ordering::Less => {
         // free the additional space
-        let additional = NonZero::new(alloc.size() - new_size.get())
+        let additional = NonZero::<S>::new(alloc.size() - new_size.get())
           .unwrap_or_else(|| unreachable!());
         self.free(Allocation {
           offset: alloc.offset + alloc.size() - additional.get(),
@@ -353,7 +361,7 @@ impl Allocator {
   }
 
   /// Get the total capacity of the pool
-  pub fn capacity(&self) -> Size {
+  pub fn capacity(&self) -> S {
     self.capacity.get()
   }
 
@@ -361,13 +369,13 @@ impl Allocator {
   ///
   /// Note: The memory may be fragmented, so it may not be possible to allocate
   /// an object of this size.
-  pub fn total_available(&self) -> Size {
+  pub fn total_available(&self) -> S {
     self.available
   }
 
   /// Get the size of the largest available memory region in this pool
-  pub fn largest_available(&self) -> Size {
-    self.free.last().map_or(0, |region| region.size.get())
+  pub fn largest_available(&self) -> S {
+    self.free.last().map_or(S::ZERO, |region| region.size.get())
   }
 
   /// Returns true if there are no allocations
@@ -384,7 +392,7 @@ impl Allocator {
   /// will freely allocate from the reported regions.
   pub fn report_free_regions(
     &self,
-  ) -> impl Iterator<Item = Allocation> + use<'_> {
+  ) -> impl Iterator<Item = Allocation<S>> + use<'_, S> {
     self.free.iter().map(|free_region| Allocation {
       offset: free_region.location,
       size: free_region.size,
@@ -392,16 +400,21 @@ impl Allocator {
   }
 
   /// Try to find a region with at least `size`
-  fn find_free_region(&mut self, size: NonZero<Size>) -> Option<FreeRegion> {
+  fn find_free_region(&mut self, size: NonZero<S>) -> Option<FreeRegion<S>> {
     self
       .free
-      .range(FreeRegion { size, location: 0 }..)
+      .range(
+        FreeRegion {
+          size,
+          location: S::ZERO,
+        }..,
+      )
       .copied()
       .next()
   }
 
   /// Get the first free-region before `location`
-  fn previous_free_region(&self, location: Location) -> Option<FreeRegion> {
+  fn previous_free_region(&self, location: S) -> Option<FreeRegion<S>> {
     self
       .location_map
       .range(..location)
@@ -410,7 +423,7 @@ impl Allocator {
   }
 
   /// Get the first free-region after `location`
-  fn following_free_region(&self, location: Location) -> Option<FreeRegion> {
+  fn following_free_region(&self, location: S) -> Option<FreeRegion<S>> {
     use ::core::ops::Bound as B;
     self
       .location_map
@@ -420,7 +433,7 @@ impl Allocator {
   }
 
   /// remove a region from the internal free lists
-  fn remove_free_region(&mut self, location: Location, size: NonZero<Size>) {
+  fn remove_free_region(&mut self, location: S, size: NonZero<S>) {
     self.location_map.remove(&location);
     let region_existed = self.free.remove(&FreeRegion { location, size });
 
@@ -432,7 +445,7 @@ impl Allocator {
   }
 
   /// add a region to the internal free lists
-  fn insert_free_region(&mut self, location: Location, size: NonZero<Size>) {
+  fn insert_free_region(&mut self, location: S, size: NonZero<S>) {
     self.free.insert(FreeRegion { location, size });
     let existing_size = self.location_map.insert(location, size);
 
@@ -448,7 +461,7 @@ impl Allocator {
   }
 }
 
-impl fmt::Debug for Allocator {
+impl<S: Size> fmt::Debug for Allocator<S> {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     f.debug_struct("Allocator")
       .field("capacity", &self.capacity)
@@ -459,12 +472,12 @@ impl fmt::Debug for Allocator {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub struct Overflow {
-  pub current_capacity: NonZero<Size>,
-  pub additional: NonZero<Size>,
+pub struct Overflow<S: Size = u32> {
+  pub current_capacity: NonZero<S>,
+  pub additional: NonZero<S>,
 }
-impl Error for Overflow {}
-impl fmt::Display for Overflow {
+impl<S: Size> Error for Overflow<S> {}
+impl<S: Size> fmt::Display for Overflow<S> {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     f.write_fmt(format_args!(
       "Overflow Error: Allocator with capacity {} could not grow by additional {}.",
@@ -474,16 +487,16 @@ impl fmt::Display for Overflow {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum ReallocateError {
+pub enum ReallocateError<S: Size = u32> {
   InsufficientSpace {
-    required_additional: NonZero<Size>,
-    available: Size,
+    required_additional: NonZero<S>,
+    available: S,
   },
   Invalid,
 }
 
-impl Error for ReallocateError {}
-impl fmt::Display for ReallocateError {
+impl<S: Size> Error for ReallocateError<S> {}
+impl<S: Size> fmt::Display for ReallocateError<S> {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match self {
       ReallocateError::InsufficientSpace {
@@ -498,4 +511,101 @@ impl fmt::Display for ReallocateError {
       },
     }
   }
+}
+
+/// These traits are public so they can appear in the bounds of the public
+/// types, but they live in a private module so they cannot be named (or
+/// implemented) outside of this crate.
+mod private {
+  use ::core::{
+    fmt,
+    hash::Hash,
+    ops::{Add, AddAssign, Rem, Sub, SubAssign},
+  };
+
+  /// An unsigned integer type that can be used to measure sizes and offsets
+  ///
+  /// This trait is implemented for all of the primitive unsigned integer types
+  /// (`u8`, `u16`, `u32`, `u64`, `u128` and `usize`). It can also be implemented
+  /// for other integer-like types, provided they have a non-zero counterpart
+  /// (see `Size::NonZero`).
+  pub trait Size:
+    Copy
+    + Ord
+    + Hash
+    + fmt::Debug
+    + fmt::Display
+    + Add<Output = Self>
+    + Sub<Output = Self>
+    + Rem<Output = Self>
+    + AddAssign
+    + SubAssign
+  {
+    /// The value `0`
+    const ZERO: Self;
+    /// The value `1`
+    const ONE: Self;
+
+    /// The non-zero counterpart of this type
+    ///
+    /// [`Allocation`] stores its size in this form so that it has a niche.
+    type NonZero: NonZeroSize<Size = Self>;
+
+    /// Convert to a `usize`, as if by an `as` cast
+    fn as_usize(self) -> usize;
+  }
+
+  /// The non-zero counterpart of a `Size`
+  ///
+  /// This mirrors the interface of `core::num::NonZero`, which cannot be used
+  /// generically on stable Rust. It is implemented for each `NonZero<T>` whose
+  /// `T` implements `Size`.
+  pub trait NonZeroSize:
+    Copy + Ord + Hash + fmt::Debug + fmt::Display
+  {
+    /// The underlying `Size`
+    type Size: Size<NonZero = Self>;
+
+    /// Create a non-zero value if `n` is non-zero
+    fn new(n: Self::Size) -> Option<Self>;
+
+    /// Get the underlying value
+    fn get(self) -> Self::Size;
+
+    /// Add to the value, returning `None` if the result overflows
+    fn checked_add(self, other: Self::Size) -> Option<Self>;
+  }
+
+  macro_rules! impl_size {
+    ($($ty:ty),* $(,)?) => {$(
+      impl Size for $ty {
+        const ZERO: Self = 0;
+        const ONE: Self = 1;
+
+        type NonZero = ::core::num::NonZero<$ty>;
+
+        fn as_usize(self) -> usize {
+          self as usize
+        }
+      }
+
+      impl NonZeroSize for ::core::num::NonZero<$ty> {
+        type Size = $ty;
+
+        fn new(n: $ty) -> Option<Self> {
+          <::core::num::NonZero<$ty>>::new(n)
+        }
+
+        fn get(self) -> $ty {
+          <::core::num::NonZero<$ty>>::get(self)
+        }
+
+        fn checked_add(self, other: $ty) -> Option<Self> {
+          <::core::num::NonZero<$ty>>::checked_add(self, other)
+        }
+      }
+    )*};
+  }
+
+  impl_size!(u8, u16, u32, u64, u128, usize);
 }

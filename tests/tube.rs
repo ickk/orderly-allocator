@@ -16,7 +16,7 @@ fn allocaton_type_size() {
 
 #[test]
 fn allocation_size_and_align() {
-  let mut allocator = Allocator::new(1_000_000);
+  let mut allocator = Allocator::<u32>::new(1_000_000);
   {
     let a = allocator.alloc(59).unwrap();
     assert_eq!(a.size(), 59, "Allocation size is as requested");
@@ -268,4 +268,79 @@ fn try_reallocate() {
     );
     new_a
   };
+}
+
+/// Exercise alloc, alignment, coalescing, grow, and reallocate for a size type
+macro_rules! exercise {
+  ($ty:ty, $capacity:expr) => {{
+    type S = $ty;
+    let capacity: S = $capacity;
+
+    let mut allocator = Allocator::new(capacity);
+    assert_eq!(allocator.capacity(), capacity);
+    assert_eq!(allocator.largest_available(), capacity);
+
+    let a = allocator.alloc(10).unwrap();
+    let b = allocator.alloc_with_align(10, 8).unwrap();
+    assert_eq!(a.size(), 10);
+    assert_eq!(b.offset() % 8, 0);
+    assert!(allocator.alloc(0).is_none());
+    assert!(allocator.alloc_with_align(1, 0).is_none());
+
+    let a = allocator.try_reallocate(a, 5).unwrap();
+    assert_eq!(a.size(), 5);
+    assert!(matches!(
+      allocator.try_reallocate(a, 0),
+      Err(ReallocateError::Invalid)
+    ));
+
+    allocator.free(a);
+    allocator.free(b);
+    assert!(allocator.is_empty());
+    assert_eq!(allocator.largest_available(), capacity);
+    assert_eq!(allocator.report_free_regions().count(), 1);
+
+    allocator.grow_capacity(20).unwrap();
+    assert_eq!(allocator.capacity(), capacity + 20);
+    assert_eq!(allocator.total_available(), capacity + 20);
+    assert_eq!(allocator.report_free_regions().count(), 1);
+
+    allocator.reset();
+    assert!(allocator.is_empty());
+  }};
+}
+
+#[test]
+fn generic_sizes() {
+  exercise!(u8, 100);
+  exercise!(u16, 1_000);
+  exercise!(u32, 1_000);
+  exercise!(u64, 1_000);
+  exercise!(u128, 1_000);
+  exercise!(usize, 1_000);
+}
+
+#[test]
+fn generic_niche_and_size() {
+  use core::mem::size_of;
+  assert_eq!(size_of::<Allocation<u8>>(), 2);
+  assert_eq!(size_of::<Option<Allocation<u8>>>(), 2);
+  assert_eq!(size_of::<Allocation<u64>>(), 16);
+  assert_eq!(size_of::<Option<Allocation<u64>>>(), 16);
+}
+
+#[test]
+fn generic_overflow() {
+  let mut allocator = Allocator::<u8>::new(200);
+  assert!(allocator.grow_capacity(100).is_err());
+  assert_eq!(allocator.capacity(), 200, "Capacity unchanged on overflow");
+  assert!(allocator.alloc_with_align(100, 200).is_none());
+}
+
+#[test]
+fn range_generic() {
+  let mut allocator = Allocator::<u16>::new(100);
+  allocator.alloc(3).unwrap();
+  let b = allocator.alloc(4).unwrap();
+  assert_eq!(b.range(), 3..7);
 }

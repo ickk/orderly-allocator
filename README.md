@@ -67,6 +67,24 @@ allocator.free(allocation);
 ```
 
 
+### Choosing the size type
+
+`Allocator` and `Allocation` are generic over the integer type used to measure
+offsets and sizes, which defaults to `u32`. `u8`, `u16`, `u32`, `u64`, `u128`
+and `usize` are supported.
+
+```rust
+use ::orderly_allocator::Allocator;
+
+let mut allocator = Allocator::<u64>::new(1 << 40);
+let allocation = allocator.alloc(4096).unwrap();
+assert_eq!(allocation.size(), 4096_u64);
+```
+
+Note that an untyped integer literal (`Allocator::new(1024)`) will not infer
+a `Size` by itself; annotate the type or pass a typed value.
+
+
 ### `#![no_std]`
 
 This crate works in a `no_std` context, however it requires the `alloc` crate
